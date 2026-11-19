@@ -1,0 +1,8 @@
+************************************
+* Catalog statistics for host ecs-f0ff-9970 
+************************************
+
+************************************
+ source /home/omm/.bashrc ; gs_clean -a -N -s -p 26000 
+************************************
+/bin/sh: gs_clean: command not found

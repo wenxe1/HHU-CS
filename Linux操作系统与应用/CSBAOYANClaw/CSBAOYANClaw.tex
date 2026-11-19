@@ -1,0 +1,121 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage[UTF8]{ctex}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{booktabs}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{CSBAOYANClaw：基于 OpenClaw 与 NapCat 的保研群情报日报 Agent\\
+{\footnotesize Linux 课程实践个人报告：CSBAOYANClaw 情报日报 Agent 的开发与实现}
+}
+
+\author{
+\IEEEauthorblockN{温晓易}
+\IEEEauthorblockA{
+\textit{Linux 课程实践项目组}\\
+计算机专业保研 QQ 群情报日报 Agent\\
+}
+}
+
+\maketitle
+
+\begin{abstract}
+本报告记录我在 Linux 课程实践项目 CSBAOYANClaw 中的个人工作。项目目标是在已经完成服务器、Docker、OpenClaw 与 NapCat 等基础环境部署后，开发一个面向计算机保研 QQ 群的信息处理 Agent。我的主要任务不是简单调用大模型，而是在现有环境之上完成后端业务链路、消息入库、日报生成、历史问答、Web UI 与 OpenClaw Skill 的开发。实践过程中，我将 AI 作为架构讨论者、代码协作者、日志诊断助手、Prompt 优化器和报告整理工具，逐步完成从想法验证到可演示系统的实现。最终系统能够自动接收指定 QQ 群消息，进行本地筛选和打分，调用 AI 抽取高价值保研情报，生成 Markdown 日报，并支持网页端命令式问答与历史日报查看。
+\end{abstract}
+
+\begin{IEEEkeywords}
+OpenClaw, NapCat, Linux, Docker, FastAPI, SQLite, AI Agent, 保研信息
+\end{IEEEkeywords}
+
+\section{项目背景与个人分工}
+
+本次课程实践要求在云服务器上部署 Linux 系统，并基于 OpenClaw 创建一个对学习或生活有帮助的 Agent。我们选择的场景是计算机专业保研 QQ 群。该类群聊每天会产生大量碎片化消息，其中既有官方通知转发、夏令营报名经验、导师联系建议，也有大量闲聊、表情、重复提问和未经核实的传闻。人工逐条阅读成本较高，且重要信息容易被刷屏消息淹没。因此，我们设计了 CSBAOYANClaw，希望它每天自动整理群内高价值信息，生成日报，并支持后续问答检索。
+
+在团队分工中，我负责的是在已经部署好的服务器和基础环境之上开发 CSBAOYANClaw 的应用层能力。具体包括：设计 FastAPI 后端接口，接收 NapCat 的 QQ 群消息上报；将消息存入 SQLite；实现 CQ 码清理、发送者脱敏、候选消息筛选和质量打分；调用 DeepSeek 模型生成结构化日报；保存 Markdown 文件；实现 QQ 私发、历史问答和 Web UI；最后再补充 OpenClaw Skill，使 OpenClaw 能以自然语言方式调用这些工具。
+
+\section{AI 辅助下的需求分析}
+
+项目开始时，我并没有直接写代码，而是先用 AI 反复讨论需求边界。最初的想法只是“每天总结 QQ 群消息”，但这个描述过于宽泛。通过和 AI 对话，我逐步把需求拆成几个更可执行的模块：消息采集、消息持久化、候选筛选、AI 摘要、日报文件、私聊推送、历史问答和网页展示。AI 在这里的作用不是替我决定功能，而是帮助我把模糊想法转化为可实现的工程路线。
+
+例如，我使用过类似的提示词：
+
+\begin{quote}
+我有一个计算机保研 QQ 群，里面有很多有用信息，但我没时间一条条看。能不能让 OpenClaw 每天帮我看，然后整理有用信息为 Markdown 文档，并且以后问答时可以参考这些历史信息？我们先做可行性分析。
+\end{quote}
+
+这个 Prompt 的价值在于它同时给出了场景、痛点、输入、输出和约束。AI 根据这个描述帮我分析了 NapCat 接入 QQ 群、FastAPI 接收 HTTP 上报、SQLite 保存消息、Markdown 作为日报沉淀格式的可行性。随后我又继续追问“整体功能路线是否合理”“哪些部分应先实现”“哪些接口需要保留”，从而形成了较清晰的开发路线。
+
+\section{AI 辅助下的工作流设计}
+
+我的工作流可以概括为“先让 AI 帮我设计，再由我在服务器上执行和验证，最后把真实日志反馈给 AI 继续修改”。这不是一次性生成完整代码，而是一个持续迭代过程。
+
+第一步是架构拆解。AI 帮我把系统拆成 NapCat、FastAPI、SQLite、DeepSeek、Markdown、Web UI、OpenClaw Skill 等层次。其中 NapCat 负责 QQ 接入，FastAPI 负责业务编排，SQLite 保存消息和日报，DeepSeek 负责抽取和总结，Web UI 负责可视化操作，OpenClaw Skill 则把这些后端能力暴露给 OpenClaw。
+
+第二步是代码生成。我让 AI 一次性生成后端全链路代码，而不是让我在服务器上零散拼接。AI 给出的代码包括 Docker Compose、FastAPI 路由、数据库表结构、消息入库函数、日报生成接口和 QA 接口。我再根据实际服务器路径、端口和 API Key 进行调整。
+
+第三步是日志驱动调试。每次遇到错误，我都会把终端日志粘贴给 AI，例如 Docker 网络不通、NapCat HTTP Server 未开启、DeepSeek API 返回 403、FastAPI 容器报 Internal Server Error 等。AI 根据日志判断问题位置，并给出下一步最小修改。例如当 NapCat 能上报消息但无法私发 QQ 时，AI 判断出只配置了 HTTP Client，还缺少 HTTP Server；当日报总数一直为 800 时，AI 进一步指出代码里有 LIMIT 800，导致只能读取当天最早的 800 条消息。
+
+第四步是验收与重构。系统跑通后，AI 又帮助我根据实际效果继续优化。例如最初是把大量群消息直接交给模型，导致日报质量不稳定；后来改成本地先做关键词筛选和质量打分，再把高分候选及其前后上下文交给 AI。一次测试中，系统读取了 1856 条群消息，关键词初筛 288 条，打分候选 111 条，最终送入 AI 上下文 283 条并提取 11 条高价值信息。这个结果说明系统不是简单“套壳大模型”，而是进行了本地预处理和工程化控制。
+
+\section{提示词与 Prompt 设计}
+
+在本项目中，Prompt 主要有三类。
+
+第一类是需求分析 Prompt。我会明确告诉 AI 当前项目背景、课程要求和我个人分工，例如“我负责的是在已经部署好的服务器和环境下开发 CSBAOYANClaw”。这样 AI 的建议会更贴近我的实际任务，而不是泛泛地介绍 Agent。
+
+第二类是代码生成 Prompt。这类 Prompt 通常包含目标、环境、接口和约束。例如我会说明服务器路径是 \texttt{/opt/csbaoyanclaw/app}，数据库用 SQLite，NapCat 通过 HTTP 上报，日报存成 Markdown，模型使用 DeepSeek 官方 API。这些细节能显著减少 AI 生成代码后的修改成本。
+
+第三类是调试 Prompt。我不会只说“报错了”，而是把完整命令和输出贴给 AI。例如当 \texttt{/report/run} 返回 Internal Server Error 时，我会先运行 \texttt{docker compose logs} 或 \texttt{grep} 检查变量是否存在，再把结果发给 AI。AI 能根据真实日志判断是常量缺失、函数替换错误还是容器未重建。这个过程让我体会到，好的 Prompt 不只是提问，还包括提供足够准确的上下文和可验证证据。
+
+\section{Tools：AI 如何参与工具开发}
+
+本项目中我实际使用和开发了多个工具。首先是 FastAPI 后端工具，它提供 \texttt{/onebot} 接收消息，\texttt{/report/run} 生成日报，\texttt{/qa} 进行历史问答，\texttt{/api/reports} 提供日报列表，\texttt{/openclaw/command} 作为命令入口。AI 在这些接口的设计中起到了很大作用，特别是帮助我区分“前端展示接口”和“后端业务接口”。
+
+其次是 SQLite 数据工具。AI 帮我设计了分层存储结构：\texttt{raw\_messages} 保存原始群消息，\texttt{extracted\_items} 保存 AI 提取后的结构化情报，\texttt{reports} 保存日报文本和 Markdown。这样的设计让系统既能保留原始证据，又能提供较干净的结构化问答资料。
+
+再次是消息筛选工具。为了避免把几千条闲聊全部交给模型，我在 AI 的建议下实现了本地打分函数。它会根据“夏令营、预推免、截止、材料、导师、学校名、链接、日期”等信号加分，对表情、图片、短句闲聊等降分。最终系统只把高分候选和上下文交给模型，提高了总结质量，也降低了 token 成本。
+
+最后是 Web UI 工具。AI 帮我设计了一个接近聊天软件体验的网页：左侧是历史日报列表，主区域是命令式输入框，日报以独立阅读面板打开，不覆盖对话历史。后来我又根据实际截图反馈，让 AI 修改样式、压缩 Markdown 间距、增加生成日报时的呼吸动画，并把页面文案统一为 CSBAOYANClaw。
+
+\section{Skills：OpenClaw 参与度补强}
+
+项目后期我意识到一个问题：虽然服务器上部署了 OpenClaw，但如果核心链路都由 FastAPI 完成，老师可能会质疑 OpenClaw 的参与度。因此我在 AI 的帮助下采用了“自定义 OpenClaw Skill”的方案。
+
+具体做法是为 CSBAOYANClaw 创建一个 \texttt{SKILL.md}，说明该 Skill 何时使用、能调用哪些接口、如何生成日报、如何私发 QQ、如何进行历史问答。这样 OpenClaw 不再只是部署在服务器上的环境组件，而成为自然语言工具调用入口。用户可以输入“生成今日日报”“生成今日日报并私发 QQ”“今天群里提到了哪些保研信息”等命令，OpenClaw Skill 再调用本地 FastAPI 工具完成任务。
+
+这种设计让我对 Agent 的理解更清晰：OpenClaw 不是替代所有业务代码，而是负责把自然语言意图转化为工具调用；NapCat 负责 QQ 接入；FastAPI 负责具体业务逻辑；SQLite 和 Markdown 负责知识沉淀；大模型负责抽取、总结和问答。各层职责明确后，系统更容易解释，也更符合课程实践中“利用 OpenClaw 创建 Agent”的要求。
+
+\section{AI 帮助我解决的关键问题}
+
+AI 对我最大的帮助体现在三类问题上。
+
+第一类是环境和网络问题。例如 NapCat 能收到群消息，却不能私发 QQ。AI 根据日志判断出 NapCat 只开启了 HTTP 上报客户端，而 FastAPI 要调用 \texttt{send\_private\_msg} 还需要 NapCat HTTP Server。后来我在 NapCat Web UI 中开启 HTTP Server，才打通了 FastAPI 到 QQ 私聊的链路。
+
+第二类是模型调用问题。最初我使用硅基流动 API，接口返回 403。AI 帮我分析返回体后发现原因是账户余额不足，而不是代码错误。之后我切换到 DeepSeek 官方 API，又遇到模型 \texttt{content} 为空、输出在 \texttt{reasoning\_content} 中的问题。AI 建议增加空内容检测，避免“接口成功但日报为空”的静默失败。
+
+第三类是产品体验问题。命令行测试虽然能验证功能，但课堂展示不直观。AI 帮我把命令行操作封装为 Web UI，并逐步优化交互细节：生成日报时有动态呼吸效果，往日日报从左侧打开，复制 Markdown 按钮可用，输入框从普通 QA 变成 CSBAOYANClaw 命令入口。这些改动使项目从“能跑”变成“能展示”。
+
+\section{实践结果与反思}
+
+目前 CSBAOYANClaw 已经实现了从 QQ 群消息接入到日报生成、私聊推送和历史问答的完整闭环。系统能够监听指定保研 QQ 群，将消息写入 SQLite，对发送者进行 hash 脱敏，清理 CQ 码，按规则筛选高价值候选，调用 AI 生成 Markdown 日报，并在网页端展示所有历史日报。用户也可以通过命令式输入调用 CSBAOYANClaw，完成日报生成、QQ 私发和保研信息问答。
+
+从个人角度看，AI 显著放大了我的工程能力。它不是替我“自动完成项目”，而是在我不断提供约束、日志和反馈的过程中，帮助我缩短了查资料、定位错误和重构代码的时间。我也认识到，AI 生成的代码不能直接盲信，必须通过真实服务器运行、接口测试和日志验证。许多关键改动，例如取消 800 条消息上限、增加本地打分筛选、修复前端事件绑定，都是在实际测试中发现问题后再由 AI 辅助修改的。
+
+如果继续改进，我希望进一步加入向量检索，把 Markdown 日报和结构化情报切块后做 embedding，从而提高历史问答的召回质量；同时也可以把 FastAPI 工具进一步封装为 MCP Server，使 OpenClaw 调用更加标准化。总体而言，本项目让我真正体会到 AI 在工程实践中的价值：它不是一个简单的答案机器，而是一个能参与需求分析、系统设计、代码实现、日志诊断和文档写作的协作伙伴。
+
+\section{Conclusion}
+
+CSBAOYANClaw 是一次围绕真实学习场景展开的 Linux 与 AI Agent 实践。我负责在既有服务器和基础环境上完成应用层开发，并通过 AI 辅助完成了从需求拆解到系统实现的全过程。项目最终形成了 NapCat、FastAPI、SQLite、DeepSeek、Markdown、Web UI 与 OpenClaw Skill 结合的完整系统。相比手工阅读 QQ 群消息，CSBAOYANClaw 能自动筛选保研情报、生成日报并支持历史问答，体现了 AI 对个人学习信息管理能力的放大作用。
+
+\end{document}
